@@ -1,0 +1,153 @@
+syntax = "proto3";
+
+package nova.provider.v1;
+
+// ─────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────
+
+service ProviderService {
+  // Return the full schema this provider supports
+  rpc GetSchema     (Empty)              returns (ProviderSchema);
+  // Authenticate / configure the provider (credentials, region, etc.)
+  rpc Configure     (ConfigureRequest)   returns (ConfigureResponse);
+  // Compute the diff between desired and current state (read-only)
+  rpc PlanResource  (PlanRequest)        returns (PlanResponse);
+  // Execute the diff returned by PlanResource
+  rpc ApplyResource (ApplyRequest)       returns (ApplyResponse);
+  // Destroy a resource given its current state
+  rpc DestroyResource (DestroyRequest)   returns (DestroyResponse);
+  // Read the current live state of a resource
+  rpc ReadResource  (ReadRequest)        returns (ReadResponse);
+}
+
+// ─────────────────────────────────────────────────
+// Shared primitives
+// ─────────────────────────────────────────────────
+
+message Empty {}
+
+// A single attribute on a resource schema
+message AttributeSchema {
+  string name        = 1;
+  string type        = 2; // "string" | "number" | "bool" | "map" | "list"
+  bool   required    = 3;
+  bool   computed    = 4; // provider sets this value (e.g. ARN)
+  string description = 5;
+}
+
+// Schema for one resource type (e.g. "aws_s3_bucket")
+message ResourceTypeSchema {
+  string                  type_name   = 1;
+  string                  description = 2;
+  repeated AttributeSchema attributes = 3;
+}
+
+// ─────────────────────────────────────────────────
+// GetSchema
+// ─────────────────────────────────────────────────
+
+message ProviderSchema {
+  string                    provider_name    = 1;
+  string                    provider_version = 2;
+  repeated ResourceTypeSchema resource_types = 3;
+  // Schema for the provider {} config block itself
+  repeated AttributeSchema  config_schema    = 4;
+}
+
+// ─────────────────────────────────────────────────
+// Configure
+// ─────────────────────────────────────────────────
+
+message ConfigureRequest {
+  // Key-value pairs from the provider block (region, access_key, etc.)
+  map<string, string> config = 1;
+}
+
+message ConfigureResponse {
+  bool   ok    = 1;
+  string error = 2; // non-empty on failure
+}
+
+// ─────────────────────────────────────────────────
+// PlanResource
+// ─────────────────────────────────────────────────
+
+enum Action {
+  ACTION_NOOP    = 0;
+  ACTION_CREATE  = 1;
+  ACTION_UPDATE  = 2;
+  ACTION_DESTROY = 3;
+}
+
+message ResourceDiff {
+  string              resource_type = 1;
+  string              resource_name = 2;
+  Action              action        = 3;
+  // Desired attribute values
+  map<string, string> desired       = 4;
+  // Current attribute values (empty if resource doesn't exist yet)
+  map<string, string> current       = 5;
+  // Which attribute keys will change
+  repeated string     changed_keys  = 6;
+}
+
+message PlanRequest {
+  string              resource_type = 1;
+  string              resource_name = 2;
+  // Desired configuration from the .no file
+  map<string, string> config        = 3;
+}
+
+message PlanResponse {
+  ResourceDiff diff  = 1;
+  string       error = 2; // non-empty on failure
+}
+
+// ─────────────────────────────────────────────────
+// ApplyResource
+// ─────────────────────────────────────────────────
+
+message ResourceState {
+  string              resource_type = 1;
+  string              resource_name = 2;
+  // Actual attribute values after apply (may include computed fields)
+  map<string, string> attributes    = 3;
+  string              id            = 4; // cloud-assigned ID (ARN, resource ID, etc.)
+}
+
+message ApplyRequest {
+  ResourceDiff diff = 1;
+}
+
+message ApplyResponse {
+  ResourceState state = 1;
+  string        error = 2;
+}
+
+// ─────────────────────────────────────────────────
+// DestroyResource
+// ─────────────────────────────────────────────────
+
+message DestroyRequest {
+  ResourceState state = 1;
+}
+
+message DestroyResponse {
+  bool   ok    = 1;
+  string error = 2;
+}
+
+// ─────────────────────────────────────────────────
+// ReadResource
+// ─────────────────────────────────────────────────
+
+message ReadRequest {
+  string resource_type = 1;
+  string id            = 2; // cloud-assigned ID
+}
+
+message ReadResponse {
+  ResourceState state = 1;
+  string        error = 2;
+}
